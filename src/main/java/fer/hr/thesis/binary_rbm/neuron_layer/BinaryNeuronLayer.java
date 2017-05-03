@@ -1,8 +1,12 @@
 package fer.hr.thesis.binary_rbm.neuron_layer;
 
+import java.io.Serializable;
 import java.util.Arrays;
 
-public class BinaryNeuronLayer implements IBinaryNeuronLayer{
+public class BinaryNeuronLayer implements IBinaryNeuronLayer, Serializable{
+	
+
+	private static final long serialVersionUID = 5548095782618667836L;
 	
 	private int[] values;
 	
