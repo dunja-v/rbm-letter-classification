@@ -14,10 +14,27 @@ import javax.swing.JTextArea;
 import fer.hr.thesis.binary_rbm.BinaryRBM;
 import fer.hr.thesis.binary_rbm.neuron_layer.BinaryNeuronLayer;
 
+/**
+ * Dialog used for choosing a number of hidden neurons for the RBM to be
+ * created.
+ * 
+ * @author Dunja Vesinger
+ * @version 1.0.0
+ */
 public class JCreateRBMDialog extends JDialog {
 
-	private BinaryRBM rbm;
+	/**
+	 * Number used for serialization.
+	 */
+	private static final long serialVersionUID = 2152102758371456897L;
+	/**
+	 * Number of hidden neurons.
+	 */
+	private int numOfHidden;
 
+	/**
+	 * Constructs a new JCreateRBMDialog.
+	 */
 	public JCreateRBMDialog() {
 
 		initGUI();
@@ -25,6 +42,9 @@ public class JCreateRBMDialog extends JDialog {
 		pack();
 	}
 
+	/**
+	 * Initialized the graphical user interface of the dialog.
+	 */
 	private void initGUI() {
 
 		JPanel p = new JPanel();
@@ -32,30 +52,10 @@ public class JCreateRBMDialog extends JDialog {
 		add(p);
 		p.setBorder(BorderFactory.createEmptyBorder(20, 20, 5, 20));
 
-		JLabel lLeariningRate = new JLabel("Learning rate:");
-		JTextArea tLearningRate = new JTextArea("0.001");
-		p.add(lLeariningRate);
-		p.add(tLearningRate);
-
 		JLabel lHiddenNum = new JLabel("Number of hidden neurons:");
 		JTextArea tHiddenNum = new JTextArea("400");
 		p.add(lHiddenNum);
 		p.add(tHiddenNum);
-
-		JLabel lEpochs = new JLabel("Maximum number of epochs:");
-		JTextArea tEpochs = new JTextArea("1000");
-		p.add(lEpochs);
-		p.add(tEpochs);
-
-		JLabel lImgWidth = new JLabel("Image width:");
-		JTextArea tImgWidth = new JTextArea("108");
-		p.add(lImgWidth);
-		p.add(tImgWidth);
-
-		JLabel lImgHeight = new JLabel("Image height:");
-		JTextArea tImgHeight = new JTextArea("108");
-		p.add(lImgHeight);
-		p.add(tImgHeight);
 
 		JButton btnOK = new JButton("OK");
 		p.add(btnOK);
@@ -65,28 +65,11 @@ public class JCreateRBMDialog extends JDialog {
 			@Override
 			public void actionPerformed(ActionEvent e) {
 
-				double learningRate;
-				try {
-					learningRate = Double.parseDouble(tLearningRate.getText());
-					if (learningRate < 0) {
-						tLearningRate.setText("Must be a positive decimal number!");
-					}
-				} catch (NumberFormatException | NullPointerException ex) {
-					tLearningRate.setText("Must be a decimal number!");
+				numOfHidden = getParameter(tHiddenNum);
+
+				if (numOfHidden < 0) {
 					return;
 				}
-
-				int numOfHidden = getParameter(tHiddenNum);
-				int imageWidth = getParameter(tImgWidth);
-				int imageHeight = getParameter(tImgHeight);
-				int epochs = getParameter(tEpochs);
-
-				if (numOfHidden < 0 | imageHeight < 0 | imageWidth < 0) {
-					return;
-				}
-
-				rbm = new BinaryRBM(new BinaryNeuronLayer(new int[imageWidth * imageHeight + 26]),
-						new BinaryNeuronLayer(new int[numOfHidden]));
 
 				dispose();
 			}
@@ -94,6 +77,14 @@ public class JCreateRBMDialog extends JDialog {
 
 	}
 
+	/**
+	 * Tries to parse a positive integer from the text in the text area. Prints
+	 * and error on the text area if the value is invalid.
+	 * 
+	 * @param t
+	 *            Text area containing the parameter value
+	 * @return Value of the parameter or -1 if the input is invalid
+	 */
 	private int getParameter(JTextArea t) {
 
 		try {
@@ -112,8 +103,13 @@ public class JCreateRBMDialog extends JDialog {
 
 	}
 
-	public BinaryRBM getRbm() {
-		return rbm;
+	/**
+	 * Returns the number of hidden neurons chosen.
+	 * 
+	 * @return Number of hidden neurons
+	 */
+	public int getNumOfHidden() {
+		return numOfHidden;
 	}
 
 }

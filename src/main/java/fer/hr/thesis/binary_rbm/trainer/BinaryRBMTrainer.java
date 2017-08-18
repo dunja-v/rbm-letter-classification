@@ -1,101 +1,127 @@
 package fer.hr.thesis.binary_rbm.trainer;
 
-import java.awt.image.BufferedImage;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.FileVisitResult;
-import java.nio.file.FileVisitor;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 
-import javax.imageio.ImageIO;
-
 import fer.hr.thesis.binary_rbm.BinaryRBM;
+import fer.hr.thesis.dataset.ImageUtility;
 
+/**
+ * <p>
+ * The BinaryRBMTrainer represents a trainer which runs the Contrastive
+ * Divergence learning algorithm with one step on {@link BinaryRBM}. It enables
+ * suspending and reseting the training process as well as adding and notifying
+ * observers when a new training result is produced.
+ * </p>
+ * 
+ * <p>
+ * The results on training and validation set are periodically printed on
+ * standard output during training. Result on test set is printed after the
+ * training is done.
+ * </p>
+ * *
+ * 
+ * @author Dunja Vesinger
+ * @version 1.0.0
+ */
 public class BinaryRBMTrainer {
+	/**
+	 * Value to which visible biases are initialized if the probability of their
+	 * activation in learning samples is equal to 0.
+	 */
+	private static final int BIAS_INIT_0 = -1000;
+	/**
+	 * Value to which visible biases are initialized if the probability of their
+	 * activation in learning samples is equal to 1.
+	 */
+	private static final int BIAS_INIT_1 = 1000;
+	/**
+	 * Is the trainer currently paused.
+	 */
+	private boolean paused;
 
-	public static void trainBinaryRBM(BinaryRBM rbm, Path dataset, int numOfValidationExamples, double learningRate,
-			int maxNumOfEpochs) {
+	/**
+	 * List of observers observing the training results.
+	 */
+	private List<TrainingObserver> observers;
 
-		List<int[]> trainingExamples = new ArrayList<>();
-		List<int[]> validationExamples = new ArrayList<>();
-
-		FileVisitor<Path> datasetVisitor = new SimpleFileVisitor<Path>() {
-
-			private int letterNum = 0;
-			private int dirNum = 0;
-
-			@Override
-			public FileVisitResult preVisitDirectory(Path arg0, BasicFileAttributes arg1) throws IOException {
-				letterNum = 0;
-				return FileVisitResult.CONTINUE;
-			}
-
-			@Override
-			public FileVisitResult postVisitDirectory(Path arg0, IOException arg1) throws IOException {
-				 dirNum++;
-				 if(dirNum >= 1){
-				 return FileVisitResult.TERMINATE;
-				 }
-				return FileVisitResult.CONTINUE;
-			}
-
-			@Override
-			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-				int[] input = readImageToVector(file);
-				input = addOneHotEncoding(input, file);
-
-				if (letterNum < numOfValidationExamples) {
-					validationExamples.add(input);
-
-				} else {
-					trainingExamples.add(input);
-				}
-
-				letterNum++;
-				return FileVisitResult.CONTINUE;
-			}
-		};
-
-		try {
-
-			Files.walkFileTree(dataset, datasetVisitor);
-			if (trainingExamples.isEmpty()) {
-				return;
-			}
-			System.out.println("Loaded examples: " + trainingExamples.size());
-			rbm.setVisibleBiases(claculateInitialBiases(trainingExamples));
-			trainExamples(rbm, trainingExamples, validationExamples, learningRate, maxNumOfEpochs);
-
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-
+	/**
+	 * Creates a new instance of BinaryRBMTrainer.
+	 */
+	public BinaryRBMTrainer() {
+		observers = new ArrayList<>();
 	}
 
-	private static double[] claculateInitialBiases(List<int[]> trainingExamples) {
+	/**
+	 * Trains the given BinaryRBM using the Contrastive Divergence learning
+	 * algorithm with one step with the given learning parameters and prints the
+	 * result on test set on standard output.
+	 * 
+	 * @param rbm
+	 *            RBM to be trained
+	 * @param trainingSet
+	 *            Training set
+	 * @param testSet
+	 *            Test set
+	 * @param validationSet
+	 *            Validation set
+	 * @param learningRate
+	 *            Learning rate
+	 * @param maxNumOfEpochs
+	 *            Maximum number of epochs allowed
+	 * @param classNum
+	 *            Number of classes in the data
+	 * @param terminationCond
+	 *            Maximal allowed difference in free energies on training set
+	 *            and validation set
+	 * @param errorPrintInterval
+	 *            Number of epochs after which the error is calculated and
+	 *            observers notified
+	 * 
+	 */
+	public void trainCD1(BinaryRBM rbm, List<int[]> trainingSet, List<int[]> testSet, List<int[]> validationSet,
+			double learningRate, int maxNumOfEpochs, int classNum, int terminationCond, int errorPrintInterval) {
 
+		rbm.setVisibleBiases(claculateInitialBiases(trainingSet));
+
+		trainExamples(rbm, trainingSet, validationSet, learningRate, maxNumOfEpochs, classNum, terminationCond,
+				errorPrintInterval);
+
+		System.out.println("Error on test set:");
+		calculateError(rbm, testSet, clearLabels(testSet, classNum), classNum);
+	}
+
+	/**
+	 * Calculates the initial values of visible biases based on the probability
+	 * of their activation in the training samples.
+	 * 
+	 * @param trainingExamples
+	 *            Training samples
+	 * @return Initial values of visible biases
+	 */
+	private static double[] claculateInitialBiases(List<int[]> trainingExamples) {
 		double[] probabilities = calculateInputVectorProbailities(trainingExamples);
 
 		for (int j = 0; j < probabilities.length; j++) {
-			if(probabilities[j] == 0){
-				probabilities[j] = -7;
-			}else if(probabilities[j] == 1){
-				probabilities[j] = 7;
-			}else{
+			if (probabilities[j] == 0) {
+				probabilities[j] = BIAS_INIT_0;
+			} else if (probabilities[j] == 1) {
+				probabilities[j] = BIAS_INIT_1;
+			} else {
 				probabilities[j] = Math.log(probabilities[j] / (1 - probabilities[j]));
 			}
-			
 		}
 		return probabilities;
 	}
 
+	/**
+	 * Calculates the probabilities of each element being activated in the
+	 * training set.
+	 * 
+	 * @param trainingExamples
+	 *            Training samples
+	 * @return Probabilities of each element being activated
+	 */
 	private static double[] calculateInputVectorProbailities(List<int[]> trainingExamples) {
 		double[] probabilities = new double[trainingExamples.get(0).length];
 
@@ -106,7 +132,6 @@ public class BinaryRBMTrainer {
 				}
 			}
 		}
-
 		for (int j = 0; j < probabilities.length; j++) {
 			probabilities[j] /= trainingExamples.size();
 		}
@@ -114,151 +139,271 @@ public class BinaryRBMTrainer {
 		return probabilities;
 	}
 
-	private static void trainExamples(BinaryRBM rbm, List<int[]> trainingExamples, List<int[]> validationExamples,
-			double learningRate, int numOfEpochs) {
+	/**
+	 * Trains the given BinaryRBM using the Contrastive Divergence learning
+	 * algorithm with one step with the given learning parameters and prints the
+	 * result on training and validation set every
+	 * <code>errorPrintInterval</code> epochs.
+	 * 
+	 * @param rbm
+	 *            RBM to be trained
+	 * 
+	 * @param trainingSet
+	 *            Training set
+	 * @param testSet
+	 *            Test set
+	 * @param validationSet
+	 *            Validation set
+	 * @param learningRate
+	 *            Learning rate
+	 * @param maxNumOfEpochs
+	 *            Maximum number of epochs allowed
+	 * @param classNum
+	 *            Number of classes in the data
+	 * @param terminationCond
+	 *            Maximal allowed difference in free energies on training set
+	 *            and validation set
+	 * @param errorPrintInterval
+	 *            Number of epochs after which the error is calculated and
+	 *            observers notified
+	 * 
+	 */
+	private void trainExamples(BinaryRBM rbm, List<int[]> trainingExamples, List<int[]> validationExamples,
+			double learningRate, int numOfEpochs, int classNum, int terminationCond, int errorPrintInterval) {
 
-		double squareError = 1000;
-		double classificationError;
+		List<int[]> unlabeledTrainingExamples = clearLabels(trainingExamples, classNum);
+		List<int[]> unlabeledValidationExamples = clearLabels(validationExamples, classNum);
+		double delta = 0;
 
 		for (int i = 0; i < numOfEpochs; i++) {
 
-			squareError = 0;
-			classificationError = 0;
+			int exampleNum = trainingExamples.size() / classNum;
 
-			for (int[] example : trainingExamples) {
-				squareError += trainExample(rbm, example, learningRate, 1, 108, 108);
-				if (classificationError(rbm.getVisible().getAsVector(), example)) {
-					classificationError++;
+			for (int exampleIndex = 0; exampleIndex < exampleNum; exampleIndex++) {
+				for (int classIndex = 0; classIndex < classNum; classIndex++) {
+
+					int[] example = trainingExamples.get(exampleIndex + classIndex * exampleNum);
+
+					if (paused) {
+						pause();
+					}
+					trainExample(rbm, example, learningRate);
 				}
 			}
 
-			if (i % 50 == 0) {
-				saveAsImage(rbm.getVisible().getAsVector(), "Generated_" + i + ".png", 108, 108);
+			if (i % errorPrintInterval == 0) {
+
+				System.out.println("**********************************");
+				System.out.println("Epoch " + i);
+
+				System.out.println("Error on training set:");
+				double trainingSetFreeEnergy = calculateError(rbm, trainingExamples, unlabeledTrainingExamples,
+						classNum);
+				System.out.println("Error on validation set:");
+				double validationSetFreeEnergy = calculateError(rbm, validationExamples, unlabeledValidationExamples,
+						classNum);
+				delta = Math.abs(validationSetFreeEnergy - trainingSetFreeEnergy);
+				System.out.println("Free energy difference: " + delta);
+
+				notifyTrainingObservers(trainingSetFreeEnergy, validationSetFreeEnergy);
+
+				if (delta > terminationCond) {
+					break;
+				}
 			}
 
-			double trainingFreeEnergy = calculateFreeEnergy(rbm, trainingExamples);
-			double validationFreeEnergy = calculateFreeEnergy(rbm, validationExamples);
-
-			System.out.println("Square error in epoch " + i + ": " + squareError / trainingExamples.size());
-			System.out.println("Missclasified examples in epoch " + i + ": " + classificationError);
-			System.out.println("Free energy on training set: " + trainingFreeEnergy);
-			System.out.println("Free energy on validation set: " + validationFreeEnergy);		
 		}
 	}
 
-	private static double calculateFreeEnergy(BinaryRBM rbm, List<int[]> examples) {
-		double freeEnergy = 0;
-
-		for (int[] example : examples) {
-			rbm.setVisible(example);
-			rbm.updateHiddenNeurons();
-			freeEnergy += rbm.freeEnergy();
-		}
-
-		return freeEnergy / examples.size();
-	}
-
-	private static boolean classificationError(int[] generated, int[] original) {
-
-		boolean error = false;
-
-		for (int i = 1; i <= 26; i++) {
-			int index = generated.length - i;
-			if (generated[index] != original[index]) {
-				error = true;
-			}
-		}
-		return error;
-	}
-
-	private static double trainExample(BinaryRBM rbm, int[] input, double learningRate, int numOfEpochs, int width,
-			int height) {
+	/**
+	 * Runs the given RBM on a single sample and updates its values based on the
+	 * result.
+	 * 
+	 * @param rbm
+	 *            RBM to be trained
+	 * @param input
+	 *            Input sample
+	 * @param learningRate
+	 *            Learning rate
+	 */
+	private void trainExample(BinaryRBM rbm, int[] input, double learningRate) {
 
 		rbm.setOriginalData(input);
-		double squareError = 0;
 
-		for (int i = 0; i < numOfEpochs; i++) {
+		rbm.setVisible(input);
+		rbm.setInitialHiddenProbabilities(rbm.updateHiddenNeurons());
 
-			rbm.setVisible(input);
-			rbm.setInitialHiddenProbabilities(rbm.updateHiddenNeurons());
+		rbm.setFinalVisibleProbabilities(rbm.updateFinalVisibleNeurons());
+		rbm.setFinalHiddenProbabilities(rbm.updateHiddenNeurons());
 
-			rbm.setFinalVisibleProbabilities(rbm.updateFinalVisibleNeurons());
-			rbm.setFinalHiddenProbabilities(rbm.updateHiddenNeurons());
+		rbm.updateWeights(learningRate);
+		rbm.updateBiases(learningRate);
 
-			rbm.updateWeights(learningRate);
-			rbm.updateBiases(learningRate);
+	}
 
-			// if (exampleIndex % 300 == 0) {
-			// saveAsImage(rbm.getVisible().getAsVector(), "Generated_" +
-			// exampleIndex + "_" + i + ".png", width,
-			// height);
-			// }
+	/**
+	 * Calculates and returns the average free energies on the given set of
+	 * examples for the given RBM. Calculates the number of misclassified
+	 * examples for the set and prints the result to standard output.
+	 * 
+	 * @param rbm
+	 *            RBM to be evaluated
+	 * @param examples
+	 *            Example set with correct labels
+	 * @param unlabeledExamples
+	 *            Example set with no labels
+	 * @param numOfClasses
+	 *            Number of classes in dataset
+	 * @return Average free energy on dataset
+	 */
+	private double calculateError(BinaryRBM rbm, List<int[]> examples, List<int[]> unlabeledExamples,
+			int numOfClasses) {
 
-			for (int j = 0; j < input.length; j++) {
-				squareError += Math.pow(input[j] - rbm.getVisible().getElement(j), 2);
+		double numOfMissclasified = 0;
+		double freeEnergy = 0;
+
+		int examplSize = examples.size();
+		for (int i = 0; i < examplSize; i++) {
+			rbm.setVisible(unlabeledExamples.get(i));
+			rbm.updateHiddenNeurons();
+			freeEnergy += rbm.freeEnergy();
+			rbm.updateFinalVisibleNeurons();
+			int[] generated = rbm.getVisible().getAsVector();
+
+			if (isMissclassified(examples.get(i), generated, numOfClasses)) {
+				numOfMissclasified++;
 			}
-
 		}
 
-		return squareError / numOfEpochs;
+		freeEnergy /= examplSize;
+
+		System.out.println("Number of missclassified examples: " + numOfMissclasified);
+		System.out.println("Average free energy on set:" + freeEnergy);
+
+		return freeEnergy;
 
 	}
 
-	public static int[] readImageToVector(Path file) throws IOException {
-		BufferedImage img;
-
-		img = ImageIO.read(file.toFile());
-
-		int width = img.getWidth();
-		int height = img.getHeight();
-
-		int[] input = new int[width * height];
-
-		for (int x = 0; x < width; x++) {
-			for (int y = 0; y < height; y++) {
-				int rgbCode = img.getRGB(x, y);
-				int value = (rgbCode >> 16) & 0xff;
-				input[x * width + y] = (value > 0) ? 1 : 0;
-			}
-		}
-		return input;
-	}
-
-	private static int[] addOneHotEncoding(int[] input, Path file) {
-		String letter = file.toFile().getParentFile().getName();
-		int[] encoding = new int[26];
-		encoding[letter.charAt(0) - 65] = 1;
-
-		int[] encodedInput = new int[input.length + encoding.length];
-		System.arraycopy(input, 0, encodedInput, 0, input.length);
-		System.arraycopy(encoding, 0, encodedInput, input.length, encoding.length);
-
-		return encodedInput;
-	}
-
-	public static void saveAsImage(int[] imageVector, String fileName, int width, int height) {
-
-		BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-
-		for (int x = 0; x < width; x++) {
-			for (int y = 0; y < height; y++) {
-				if (imageVector[x * width + y] > 0)
-					img.setRGB(x, y, 0xffffff);
-				else {
-					img.setRGB(x, y, 0);
+	/**
+	 * Pauses the current thread.
+	 */
+	private void pause() {
+		synchronized (this) {
+			while (paused) {
+				try {
+					wait();
+				} catch (InterruptedException e) {
 				}
 			}
 		}
+	}
 
-		Path path = Paths.get(fileName);
-		File file = path.toFile();
+	/**
+	 * Pauses the training of BinaryRBMTrainer.
+	 */
+	public void suspend() {
+		paused = true;
+	}
 
-		try {
-			ImageIO.write(img, "png", file);
+	/**
+	 * Resumes the training of BinaryRBMTrainer.
+	 */
+	public synchronized void resume() {
+		paused = false;
+		notifyAll();
+	}
 
-		} catch (IOException e) {
-			e.printStackTrace();
+	/**
+	 * Returns a deep copy of the examples with cleared labels (all elements set
+	 * to zero).
+	 * 
+	 * @param examples
+	 *            Examples to be cleared
+	 * @param numOfClasses
+	 *            Number of classes in dataset
+	 * @return Deep copy of the examples with cleared labels
+	 */
+	private static List<int[]> clearLabels(List<int[]> examples, int numOfClasses) {
+		List<int[]> clearedExamples = new ArrayList<int[]>();
+		for (int[] example : examples) {
+			clearedExamples.add(ImageUtility.getClearedLabelCopy(example, numOfClasses));
 		}
+		return clearedExamples;
+	}
+
+	/**
+	 * Adds a training observer to the trainer.
+	 * 
+	 * @param o
+	 *            Observer to be added
+	 */
+	public void addTrainingObserver(TrainingObserver o) {
+		observers.add(o);
+	}
+
+	/**
+	 * Removes a training observer from the trainer.
+	 * 
+	 * @param o
+	 *            Observer to be removed
+	 */
+	public void removeTrainingObserver(TrainingObserver o) {
+		observers.remove(o);
+	}
+
+	/**
+	 * Notifies all training observers that a training result has been
+	 * generated.
+	 * 
+	 * @param trainingResult
+	 *            Result on training set
+	 * @param validationResult
+	 *            Result on validation set
+	 */
+	public void notifyTrainingObservers(double trainingResult, double validationResult) {
+		for (TrainingObserver o : observers) {
+			o.update(trainingResult, validationResult);
+		}
+	}
+
+	/**
+	 * Checks if the label of the generated sample is the same as the label of
+	 * the original sample.
+	 * 
+	 * @param original
+	 *            Original sample
+	 * @param generated
+	 *            Generated sample
+	 * @param numOfClasses
+	 *            Number of classes in dataset
+	 * @return True if the labels differ, False otherwise
+	 */
+	private static boolean isMissclassified(int[] original, int[] generated, int numOfClasses) {
+		for (int i = 1; i <= numOfClasses; i++) {
+			int index = generated.length - i;
+			if (generated[index] != original[index]) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Generates an output vector based on the given input vector using the RBM.
+	 * 
+	 * @param rbm
+	 *            RBM
+	 * @param vectorImg
+	 *            Input vector
+	 * @return Output vector
+	 */
+	public static int[] generate(BinaryRBM rbm, int[] vectorImg) {
+		rbm.setVisible(vectorImg);
+		rbm.updateHiddenNeurons();
+		rbm.updateFinalVisibleNeurons();
+
+		return rbm.getVisible().getAsVector();
 	}
 
 }
